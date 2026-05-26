@@ -113,7 +113,7 @@ function Invoke-PingCheck {
     param(
         [string[]]$Targets,
         [System.Windows.Forms.TextBox]$ResultBox,
-        [System.Windows.Forms.Label]$StatusLabel
+        [object]$StatusLabel
     )
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -150,7 +150,7 @@ function Invoke-TcpCheck {
         [string[]]$Targets,
         [int[]]$Ports,
         [System.Windows.Forms.TextBox]$ResultBox,
-        [System.Windows.Forms.Label]$StatusLabel
+        [object]$StatusLabel
     )
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -195,7 +195,7 @@ function Invoke-TracertCheck {
     param(
         [string[]]$Targets,
         [System.Windows.Forms.TextBox]$ResultBox,
-        [System.Windows.Forms.Label]$StatusLabel
+        [object]$StatusLabel
     )
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -212,7 +212,7 @@ function Invoke-TracertCheck {
         [System.Windows.Forms.Application]::DoEvents()
 
         try {
-            $argList = @('-d', '-h', '30', $target)
+            $argList = @('-d', '-h', '30', '-w', '1000', $target)
             $proc = New-Object System.Diagnostics.Process
             $proc.StartInfo.FileName = 'tracert.exe'
             $proc.StartInfo.Arguments = $argList -join ' '
@@ -250,7 +250,7 @@ function Invoke-DnsCheck {
     param(
         [string[]]$Targets,
         [System.Windows.Forms.TextBox]$ResultBox,
-        [System.Windows.Forms.Label]$StatusLabel
+        [object]$StatusLabel
     )
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -298,7 +298,7 @@ function Invoke-DnsCheck {
 #region ---- 保存処理 ----
 function Save-Results {
     param(
-        [System.Windows.Forms.Label]$StatusLabel
+        [object]$StatusLabel
     )
 
     if ($script:LogBuffer.Length -eq 0) {
