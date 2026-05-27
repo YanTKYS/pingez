@@ -214,21 +214,29 @@ function Invoke-TcpCheck {
             $StatusLabel.Text = "実行中: TCP $target`:$port"
             [System.Windows.Forms.Application]::DoEvents()
 
+            $client = New-Object System.Net.Sockets.TcpClient
             try {
-                $client = New-Object System.Net.Sockets.TcpClient
                 $asyncResult = $client.BeginConnect($target, $port, $null, $null)
-                $waited = $asyncResult.AsyncWaitHandle.WaitOne(3000)
-                if ($waited -and $client.Connected) {
-                    $client.EndConnect($asyncResult)
-                    Add-Result -ResultBox $ResultBox -Text "[$target`:$port]  成功 (Open)"
+                if (-not $asyncResult.AsyncWaitHandle.WaitOne(3000)) {
+                    # WaitOne が false → 3秒以内に応答なし (FW 等でパケット破棄)
+                    Add-Result -ResultBox $ResultBox -Text "[$target`:$port]  失敗 (Timeout - 応答なし)"
                 } else {
-                    Add-Result -ResultBox $ResultBox -Text "[$target`:$port]  失敗 (Timeout or Refused)"
+                    # 応答あり → EndConnect で接続成功 or 拒否(RST)を判別
+                    try {
+                        $client.EndConnect($asyncResult)
+                        Add-Result -ResultBox $ResultBox -Text "[$target`:$port]  成功 (Open)"
+                    } catch [System.Net.Sockets.SocketException] {
+                        if ($_.Exception.SocketErrorCode -eq [System.Net.Sockets.SocketError]::ConnectionRefused) {
+                            Add-Result -ResultBox $ResultBox -Text "[$target`:$port]  失敗 (Refused - ポート閉鎖)"
+                        } else {
+                            Add-Result -ResultBox $ResultBox -Text "[$target`:$port]  失敗  $($_.Exception.Message)"
+                        }
+                    }
                 }
+            } catch {
+                Add-Result -ResultBox $ResultBox -Text "[$target`:$port]  失敗  $($_.Exception.Message)"
+            } finally {
                 $client.Close()
-            }
-            catch {
-                $msg = $_.Exception.Message
-                Add-Result -ResultBox $ResultBox -Text "[$target`:$port]  失敗  $msg"
             }
         }
     }
@@ -317,17 +325,28 @@ function Invoke-DnsCheck {
 
         try {
             if ($isIP) {
-                $entry = [System.Net.Dns]::GetHostEntry($target)
+                $entry    = [System.Net.Dns]::GetHostEntry($target)
                 $hostName = $entry.HostName
-                Add-Result -ResultBox $ResultBox -Text "[$target]  逆引き成功  → $hostName"
+                # PTR レコードなしの場合、入力 IP がそのままホスト名として返ることがある
+                if ($hostName -eq $target) {
+                    Add-Result -ResultBox $ResultBox -Text "[$target]  逆引き  PTR レコードなし"
+                } else {
+                    Add-Result -ResultBox $ResultBox -Text "[$target]  逆引き成功  → $hostName"
+                }
             } else {
-                $entry = [System.Net.Dns]::GetHostEntry($target)
+                $entry     = [System.Net.Dns]::GetHostEntry($target)
                 $addresses = ($entry.AddressList | ForEach-Object { $_.ToString() }) -join ', '
-                Add-Result -ResultBox $ResultBox -Text "[$target]  正引き成功  → $addresses"
+                if ($addresses) {
+                    Add-Result -ResultBox $ResultBox -Text "[$target]  正引き成功  → $addresses"
+                } else {
+                    Add-Result -ResultBox $ResultBox -Text "[$target]  正引き  IPv4 アドレスなし (AAAA レコードのみの可能性)"
+                }
             }
         }
         catch {
-            $msg = $_.Exception.Message
+            # SocketException が内部例外として含まれる場合はそちらのメッセージが詳細
+            $inner = $_.Exception.InnerException
+            $msg   = if ($inner) { $inner.Message } else { $_.Exception.Message }
             if ($isIP) {
                 Add-Result -ResultBox $ResultBox -Text "[$target]  逆引き失敗  $msg"
             } else {
