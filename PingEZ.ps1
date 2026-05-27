@@ -531,7 +531,7 @@ function Initialize-MainForm {
 
     # ---- イベントハンドラ ----
 
-    $btnPing.Add_Click({
+    $btnPing.Add_Click(({
         $targets = Get-Targets -TextBox $txtTarget
         if (-not (Test-TargetsNotEmpty $targets)) { return }
         & $setRunning
@@ -543,9 +543,9 @@ function Initialize-MainForm {
             [System.Windows.Forms.MessageBox]::Show("Ping処理中にエラーが発生しました。`n$($_.Exception.Message)", "エラー", 'OK', 'Error') | Out-Null
         }
         & $setReady
-    })
+    }).GetNewClosure())
 
-    $btnTcp.Add_Click({
+    $btnTcp.Add_Click(({
         $targets = Get-Targets -TextBox $txtTarget
         if (-not (Test-TargetsNotEmpty $targets)) { return }
         $ports = Get-Ports -PortText $txtPort.Text
@@ -559,9 +559,9 @@ function Initialize-MainForm {
             [System.Windows.Forms.MessageBox]::Show("TCP確認中にエラーが発生しました。`n$($_.Exception.Message)", "エラー", 'OK', 'Error') | Out-Null
         }
         & $setReady
-    })
+    }).GetNewClosure())
 
-    $btnTracert.Add_Click({
+    $btnTracert.Add_Click(({
         $targets = Get-Targets -TextBox $txtTarget
         if (-not (Test-TargetsNotEmpty $targets)) { return }
         & $setRunning
@@ -573,9 +573,9 @@ function Initialize-MainForm {
             [System.Windows.Forms.MessageBox]::Show("Tracert処理中にエラーが発生しました。`n$($_.Exception.Message)", "エラー", 'OK', 'Error') | Out-Null
         }
         & $setReady
-    })
+    }).GetNewClosure())
 
-    $btnDns.Add_Click({
+    $btnDns.Add_Click(({
         $targets = Get-Targets -TextBox $txtTarget
         if (-not (Test-TargetsNotEmpty $targets)) { return }
         & $setRunning
@@ -587,17 +587,17 @@ function Initialize-MainForm {
             [System.Windows.Forms.MessageBox]::Show("DNS確認中にエラーが発生しました。`n$($_.Exception.Message)", "エラー", 'OK', 'Error') | Out-Null
         }
         & $setReady
-    })
+    }).GetNewClosure())
 
-    $btnClear.Add_Click({
+    $btnClear.Add_Click(({
         $txtResult.Clear()
         $script:LogBuffer.Clear() | Out-Null
         $statusLabel.Text = "結果をクリアしました"
-    })
+    }).GetNewClosure())
 
-    $btnSave.Add_Click({
+    $btnSave.Add_Click(({
         Save-Results -StatusLabel $statusLabel
-    })
+    }).GetNewClosure())
 
     return $form
 }
