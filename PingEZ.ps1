@@ -13,7 +13,15 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 #region ---- グローバル変数 ----
-$script:LogBuffer = [System.Text.StringBuilder]::new()
+# $script: スコープで宣言することで Initialize-MainForm 返却後もイベントハンドラから参照できる
+$script:LogBuffer   = [System.Text.StringBuilder]::new()
+$script:txtTarget   = $null
+$script:txtPort     = $null
+$script:txtResult   = $null
+$script:statusLabel = $null
+$script:execButtons = @()
+$script:setRunning  = $null
+$script:setReady    = $null
 #endregion
 
 #region ---- 入力取得 ----
@@ -78,7 +86,6 @@ function Test-PortsValid {
 
 function Test-TargetSafe {
     param([string]$Target)
-    # ホスト名/IPアドレスとして安全な文字のみ許可
     return $Target -match '^[a-zA-Z0-9.\-_:]+$'
 }
 #endregion
@@ -269,12 +276,10 @@ function Invoke-DnsCheck {
 
         try {
             if ($isIP) {
-                # 逆引き
                 $entry = [System.Net.Dns]::GetHostEntry($target)
                 $hostName = $entry.HostName
                 Add-Result -ResultBox $ResultBox -Text "[$target]  逆引き成功  → $hostName"
             } else {
-                # 正引き
                 $entry = [System.Net.Dns]::GetHostEntry($target)
                 $addresses = ($entry.AddressList | ForEach-Object { $_.ToString() }) -join ', '
                 Add-Result -ResultBox $ResultBox -Text "[$target]  正引き成功  → $addresses"
@@ -391,15 +396,16 @@ function Initialize-MainForm {
     $lblTargetHint.Font = New-Object System.Drawing.Font('Meiryo UI', 8)
     $panelLeft.Controls.Add($lblTargetHint)
 
-    $txtTarget = New-Object System.Windows.Forms.TextBox
-    $txtTarget.Location = New-Object System.Drawing.Point(0, 40)
-    $txtTarget.Size = New-Object System.Drawing.Size(228, 220)
-    $txtTarget.Multiline = $true
-    $txtTarget.ScrollBars = 'Vertical'
-    $txtTarget.Font = New-Object System.Drawing.Font('Consolas', 9)
-    $txtTarget.Text = "192.168.1.1`r`n192.168.1.254"
-    $txtTarget.Anchor = 'Top,Left,Right'
-    $panelLeft.Controls.Add($txtTarget)
+    # $script: スコープで宣言 → Initialize-MainForm 返却後もイベントハンドラから参照可能
+    $script:txtTarget = New-Object System.Windows.Forms.TextBox
+    $script:txtTarget.Location = New-Object System.Drawing.Point(0, 40)
+    $script:txtTarget.Size = New-Object System.Drawing.Size(228, 220)
+    $script:txtTarget.Multiline = $true
+    $script:txtTarget.ScrollBars = 'Vertical'
+    $script:txtTarget.Font = New-Object System.Drawing.Font('Consolas', 9)
+    $script:txtTarget.Text = "192.168.1.1`r`n192.168.1.254"
+    $script:txtTarget.Anchor = 'Top,Left,Right'
+    $panelLeft.Controls.Add($script:txtTarget)
 
     # ポートラベル
     $lblPort = New-Object System.Windows.Forms.Label
@@ -417,14 +423,14 @@ function Initialize-MainForm {
     $lblPortHint.Font = New-Object System.Drawing.Font('Meiryo UI', 8)
     $panelLeft.Controls.Add($lblPortHint)
 
-    $txtPort = New-Object System.Windows.Forms.TextBox
-    $txtPort.Location = New-Object System.Drawing.Point(0, 308)
-    $txtPort.Size = New-Object System.Drawing.Size(228, 22)
-    $txtPort.Text = "80,443,445,3389"
-    $txtPort.Font = New-Object System.Drawing.Font('Consolas', 9)
-    $panelLeft.Controls.Add($txtPort)
+    $script:txtPort = New-Object System.Windows.Forms.TextBox
+    $script:txtPort.Location = New-Object System.Drawing.Point(0, 308)
+    $script:txtPort.Size = New-Object System.Drawing.Size(228, 22)
+    $script:txtPort.Text = "80,443,445,3389"
+    $script:txtPort.Font = New-Object System.Drawing.Font('Consolas', 9)
+    $panelLeft.Controls.Add($script:txtPort)
 
-    # ---- ボタン群 ----
+    # ---- ボタン群 (ローカル変数で良い。フォームが参照を保持する) ----
     $btnY = 346
     $btnSize = New-Object System.Drawing.Size(228, 32)
     $btnGap = 38
@@ -496,108 +502,108 @@ function Initialize-MainForm {
     $lblResult.Font = New-Object System.Drawing.Font('Meiryo UI', 9, [System.Drawing.FontStyle]::Bold)
     $panelRight.Controls.Add($lblResult)
 
-    $txtResult = New-Object System.Windows.Forms.TextBox
-    $txtResult.Location = New-Object System.Drawing.Point(0, 22)
-    $txtResult.Size = New-Object System.Drawing.Size(628, 580)
-    $txtResult.Multiline = $true
-    $txtResult.ScrollBars = 'Both'
-    $txtResult.ReadOnly = $true
-    $txtResult.Font = New-Object System.Drawing.Font('Consolas', 9)
-    $txtResult.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $txtResult.ForeColor = [System.Drawing.Color]::FromArgb(200, 230, 200)
-    $txtResult.WordWrap = $false
-    $txtResult.Anchor = 'Top,Left,Right,Bottom'
-    $panelRight.Controls.Add($txtResult)
+    $script:txtResult = New-Object System.Windows.Forms.TextBox
+    $script:txtResult.Location = New-Object System.Drawing.Point(0, 22)
+    $script:txtResult.Size = New-Object System.Drawing.Size(628, 580)
+    $script:txtResult.Multiline = $true
+    $script:txtResult.ScrollBars = 'Both'
+    $script:txtResult.ReadOnly = $true
+    $script:txtResult.Font = New-Object System.Drawing.Font('Consolas', 9)
+    $script:txtResult.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+    $script:txtResult.ForeColor = [System.Drawing.Color]::FromArgb(200, 230, 200)
+    $script:txtResult.WordWrap = $false
+    $script:txtResult.Anchor = 'Top,Left,Right,Bottom'
+    $panelRight.Controls.Add($script:txtResult)
 
     # ---- ステータスバー ----
     $statusStrip = New-Object System.Windows.Forms.StatusStrip
-    $statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
-    $statusLabel.Text = "準備完了 - 宛先を入力して実行ボタンを押してください"
-    $statusLabel.Spring = $true
-    $statusLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-    $statusStrip.Items.Add($statusLabel) | Out-Null
+    $script:statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
+    $script:statusLabel.Text = "準備完了 - 宛先を入力して実行ボタンを押してください"
+    $script:statusLabel.Spring = $true
+    $script:statusLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    $statusStrip.Items.Add($script:statusLabel) | Out-Null
     $form.Controls.Add($statusStrip)
 
-    # ---- ヘルパー: ボタン一括制御 ----
-    $allButtons = @($btnPing, $btnTcp, $btnTracert, $btnDns, $btnClear, $btnSave)
-    $execButtons = @($btnPing, $btnTcp, $btnTracert, $btnDns)
+    # ---- ボタン一括制御スクリプトブロック ----
+    $script:execButtons = @($btnPing, $btnTcp, $btnTracert, $btnDns)
 
-    $setRunning = {
-        foreach ($b in $execButtons) { $b.Enabled = $false }
+    $script:setRunning = {
+        foreach ($b in $script:execButtons) { $b.Enabled = $false }
     }
-    $setReady = {
-        foreach ($b in $execButtons) { $b.Enabled = $true }
+    $script:setReady = {
+        foreach ($b in $script:execButtons) { $b.Enabled = $true }
     }
 
     # ---- イベントハンドラ ----
+    # $script: 変数を直接参照するため GetNewClosure() は不要
 
-    $btnPing.Add_Click(({
-        $targets = Get-Targets -TextBox $txtTarget
+    $btnPing.Add_Click({
+        $targets = Get-Targets -TextBox $script:txtTarget
         if (-not (Test-TargetsNotEmpty $targets)) { return }
-        & $setRunning
-        $statusLabel.Text = "実行中: Ping 確認..."
+        & $script:setRunning
+        $script:statusLabel.Text = "実行中: Ping 確認..."
         try {
-            Invoke-PingCheck -Targets $targets -ResultBox $txtResult -StatusLabel $statusLabel
+            Invoke-PingCheck -Targets $targets -ResultBox $script:txtResult -StatusLabel $script:statusLabel
         } catch {
-            $statusLabel.Text = "エラー: $($_.Exception.Message)"
+            $script:statusLabel.Text = "エラー: $($_.Exception.Message)"
             [System.Windows.Forms.MessageBox]::Show("Ping処理中にエラーが発生しました。`n$($_.Exception.Message)", "エラー", 'OK', 'Error') | Out-Null
         }
-        & $setReady
-    }).GetNewClosure())
+        & $script:setReady
+    })
 
-    $btnTcp.Add_Click(({
-        $targets = Get-Targets -TextBox $txtTarget
+    $btnTcp.Add_Click({
+        $targets = Get-Targets -TextBox $script:txtTarget
         if (-not (Test-TargetsNotEmpty $targets)) { return }
-        $ports = Get-Ports -PortText $txtPort.Text
-        if (-not (Test-PortsValid -PortText $txtPort.Text -Ports $ports)) { return }
-        & $setRunning
-        $statusLabel.Text = "実行中: TCP ポート確認..."
+        $ports = Get-Ports -PortText $script:txtPort.Text
+        if (-not (Test-PortsValid -PortText $script:txtPort.Text -Ports $ports)) { return }
+        & $script:setRunning
+        $script:statusLabel.Text = "実行中: TCP ポート確認..."
         try {
-            Invoke-TcpCheck -Targets $targets -Ports $ports -ResultBox $txtResult -StatusLabel $statusLabel
+            Invoke-TcpCheck -Targets $targets -Ports $ports -ResultBox $script:txtResult -StatusLabel $script:statusLabel
         } catch {
-            $statusLabel.Text = "エラー: $($_.Exception.Message)"
+            $script:statusLabel.Text = "エラー: $($_.Exception.Message)"
             [System.Windows.Forms.MessageBox]::Show("TCP確認中にエラーが発生しました。`n$($_.Exception.Message)", "エラー", 'OK', 'Error') | Out-Null
         }
-        & $setReady
-    }).GetNewClosure())
+        & $script:setReady
+    })
 
-    $btnTracert.Add_Click(({
-        $targets = Get-Targets -TextBox $txtTarget
+    $btnTracert.Add_Click({
+        $targets = Get-Targets -TextBox $script:txtTarget
         if (-not (Test-TargetsNotEmpty $targets)) { return }
-        & $setRunning
-        $statusLabel.Text = "実行中: Tracert 確認... (時間がかかる場合があります)"
+        & $script:setRunning
+        $script:statusLabel.Text = "実行中: Tracert 確認... (時間がかかる場合があります)"
         try {
-            Invoke-TracertCheck -Targets $targets -ResultBox $txtResult -StatusLabel $statusLabel
+            Invoke-TracertCheck -Targets $targets -ResultBox $script:txtResult -StatusLabel $script:statusLabel
         } catch {
-            $statusLabel.Text = "エラー: $($_.Exception.Message)"
+            $script:statusLabel.Text = "エラー: $($_.Exception.Message)"
             [System.Windows.Forms.MessageBox]::Show("Tracert処理中にエラーが発生しました。`n$($_.Exception.Message)", "エラー", 'OK', 'Error') | Out-Null
         }
-        & $setReady
-    }).GetNewClosure())
+        & $script:setReady
+    })
 
-    $btnDns.Add_Click(({
-        $targets = Get-Targets -TextBox $txtTarget
+    $btnDns.Add_Click({
+        $targets = Get-Targets -TextBox $script:txtTarget
         if (-not (Test-TargetsNotEmpty $targets)) { return }
-        & $setRunning
-        $statusLabel.Text = "実行中: DNS 確認..."
+        & $script:setRunning
+        $script:statusLabel.Text = "実行中: DNS 確認..."
         try {
-            Invoke-DnsCheck -Targets $targets -ResultBox $txtResult -StatusLabel $statusLabel
+            Invoke-DnsCheck -Targets $targets -ResultBox $script:txtResult -StatusLabel $script:statusLabel
         } catch {
-            $statusLabel.Text = "エラー: $($_.Exception.Message)"
+            $script:statusLabel.Text = "エラー: $($_.Exception.Message)"
             [System.Windows.Forms.MessageBox]::Show("DNS確認中にエラーが発生しました。`n$($_.Exception.Message)", "エラー", 'OK', 'Error') | Out-Null
         }
-        & $setReady
-    }).GetNewClosure())
+        & $script:setReady
+    })
 
-    $btnClear.Add_Click(({
-        $txtResult.Clear()
+    $btnClear.Add_Click({
+        $script:txtResult.Clear()
         $script:LogBuffer.Clear() | Out-Null
-        $statusLabel.Text = "結果をクリアしました"
-    }).GetNewClosure())
+        $script:statusLabel.Text = "結果をクリアしました"
+    })
 
-    $btnSave.Add_Click(({
-        Save-Results -StatusLabel $statusLabel
-    }).GetNewClosure())
+    $btnSave.Add_Click({
+        Save-Results -StatusLabel $script:statusLabel
+    })
 
     return $form
 }
