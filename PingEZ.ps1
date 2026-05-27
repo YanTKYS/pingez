@@ -490,7 +490,7 @@ function Initialize-MainForm {
     $script:txtTarget.Multiline  = $true
     $script:txtTarget.ScrollBars = 'Vertical'
     $script:txtTarget.Font       = New-Object System.Drawing.Font('Consolas', 9)
-    $script:txtTarget.Text       = "192.168.1.1`r`n192.168.1.254"
+    $script:txtTarget.Text       = ""
     $panelLeft.Controls.Add($script:txtTarget)
 
     # 宛先リスト 読込 / 保存 (横並び小ボタン)
