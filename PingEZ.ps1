@@ -279,15 +279,44 @@ function Invoke-TracertCheck {
             $proc.StartInfo.StandardOutputEncoding = [System.Text.Encoding]::GetEncoding(932)
             $proc.Start() | Out-Null
 
+            $prevBlank = $false
+            $hopCount  = 0
+
             while (-not $proc.StandardOutput.EndOfStream) {
                 $line = $proc.StandardOutput.ReadLine()
-                Add-Result -ResultBox $ResultBox -Text $line
+
+                # 連続する空行を 1 行に圧縮
+                if ([string]::IsNullOrWhiteSpace($line)) {
+                    if (-not $prevBlank) {
+                        Add-Result -ResultBox $ResultBox -Text ""
+                        $prevBlank = $true
+                    }
+                    continue
+                }
+                $prevBlank = $false
+
+                # ホップ行 (先頭スペース + 数字) の整形
+                if ($line -match '^\s+\d+\s+') {
+                    $hopCount++
+                    if ($line -match '\*\s+\*\s+\*') {
+                        # 3 プローブすべて無応答 → 注釈を付ける
+                        Add-Result -ResultBox $ResultBox -Text "$line  ← ICMP 無応答"
+                    } else {
+                        Add-Result -ResultBox $ResultBox -Text $line
+                    }
+                } else {
+                    Add-Result -ResultBox $ResultBox -Text $line
+                }
             }
             $proc.WaitForExit(60000) | Out-Null
 
             if (-not $proc.HasExited) {
                 $proc.Kill()
                 Add-Result -ResultBox $ResultBox -Text "[タイムアウト: tracert を強制終了しました]"
+            }
+
+            if ($hopCount -gt 0) {
+                Add-Result -ResultBox $ResultBox -Text "  [経由ホップ数: $hopCount]"
             }
         }
         catch {
