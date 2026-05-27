@@ -116,6 +116,8 @@ function Add-Separator {
 #endregion
 
 #region ---- ping処理 ----
+# WMI (Test-Connection) はタイムアウトを「リソース不足」と誤報することがあるため
+# System.Net.NetworkInformation.Ping を使用して正確なステータスを取得する
 function Invoke-PingCheck {
     param(
         [string[]]$Targets,
@@ -126,6 +128,10 @@ function Invoke-PingCheck {
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     Add-Separator -ResultBox $ResultBox -Title "Ping 確認  [$timestamp]"
 
+    $buffer  = [byte[]](1..32)
+    $options = New-Object System.Net.NetworkInformation.PingOptions
+    $pingCount = 2
+
     foreach ($target in $Targets) {
         if (-not (Test-TargetSafe $target)) {
             Add-Result -ResultBox $ResultBox -Text "[$target]  スキップ: 不正な文字が含まれています"
@@ -135,14 +141,49 @@ function Invoke-PingCheck {
         $StatusLabel.Text = "実行中: ping → $target"
         [System.Windows.Forms.Application]::DoEvents()
 
-        try {
-            $pingResult = Test-Connection -ComputerName $target -Count 2 -ErrorAction Stop
-            $avg = [math]::Round(($pingResult | Measure-Object -Property ResponseTime -Average).Average, 1)
-            Add-Result -ResultBox $ResultBox -Text "[$target]  成功  応答時間: ${avg}ms"
+        $ping         = New-Object System.Net.NetworkInformation.Ping
+        $successCount = 0
+        $totalTime    = 0
+        $lastStatus   = $null
+        $errMsg       = $null
+
+        for ($i = 0; $i -lt $pingCount; $i++) {
+            try {
+                $reply      = $ping.Send($target, 2000, $buffer, $options)
+                $lastStatus = $reply.Status
+                if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
+                    $successCount++
+                    $totalTime += $reply.RoundtripTime
+                }
+            } catch {
+                $inner  = $_.Exception.InnerException
+                $errMsg = if ($inner) { $inner.Message } else { $_.Exception.Message }
+                break
+            }
         }
-        catch {
-            $msg = $_.Exception.Message
-            Add-Result -ResultBox $ResultBox -Text "[$target]  失敗  $msg"
+        $ping.Dispose()
+
+        if ($errMsg) {
+            Add-Result -ResultBox $ResultBox -Text "[$target]  失敗  $errMsg"
+        } elseif ($successCount -gt 0) {
+            $avg = [math]::Round($totalTime / $successCount, 1)
+            Add-Result -ResultBox $ResultBox -Text "[$target]  成功  応答時間: ${avg}ms"
+        } else {
+            $statusMsg = switch ($lastStatus.ToString()) {
+                'TimedOut'                      { 'タイムアウト' }
+                'DestinationHostUnreachable'     { '宛先ホスト到達不可' }
+                'DestinationNetworkUnreachable'  { '宛先ネットワーク到達不可' }
+                'DestinationUnreachable'         { '宛先到達不可' }
+                'DestinationProtocolUnreachable' { '宛先プロトコル到達不可' }
+                'DestinationPortUnreachable'     { '宛先ポート到達不可' }
+                'NoResources'                   { 'リソース不足 (ネットワーク輻輳)' }
+                'TtlExpired'                    { 'TTL 超過' }
+                'BadRoute'                      { 'ルート不正' }
+                'IcmpError'                     { 'ICMP エラー' }
+                'Unknown'                       { '不明なエラー' }
+                default                         { $lastStatus.ToString() }
+            }
+            Add-Result -ResultBox $ResultBox -Text "[$target]  失敗  $statusMsg"
         }
     }
 
