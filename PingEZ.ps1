@@ -258,6 +258,8 @@ function Invoke-TracertCheck {
         $StatusLabel.Text = "実行中: tracert → $target  (時間がかかる場合があります)"
         [System.Windows.Forms.Application]::DoEvents()
 
+        $hopIPs = [System.Collections.Generic.List[string]]::new()
+
         try {
             $proc = New-Object System.Diagnostics.Process
             $proc.StartInfo.FileName               = 'tracert.exe'
@@ -281,6 +283,10 @@ function Invoke-TracertCheck {
                 $prevBlank = $false
                 if ($line -match '^\s+\d+\s+') {
                     $hopCount++
+                    # ホップ行末尾の IPv4 アドレスを収集 (タイムアウト行は対象外)
+                    if ($line -match '(\d{1,3}(?:\.\d{1,3}){3})\s*$') {
+                        $hopIPs.Add($matches[1]) | Out-Null
+                    }
                     if ($line -match '\*\s+\*\s+\*') {
                         Add-Result -ResultBox $ResultBox -Text "$line  ← ICMP 無応答"
                     } else {
@@ -297,6 +303,30 @@ function Invoke-TracertCheck {
             }
             if ($hopCount -gt 0) {
                 Add-Result -ResultBox $ResultBox -Text "  [経由ホップ数: $hopCount]"
+            }
+
+            # ホップ IP の DNS 逆引き
+            $uniqueIPs = $hopIPs | Select-Object -Unique
+            if ($uniqueIPs) {
+                Add-Result -ResultBox $ResultBox -Text ""
+                Add-Result -ResultBox $ResultBox -Text "  --- ホップ IP 逆引き ---"
+                foreach ($ip in $uniqueIPs) {
+                    $StatusLabel.Text = "DNS 逆引き中: $ip"
+                    [System.Windows.Forms.Application]::DoEvents()
+                    try {
+                        $entry    = [System.Net.Dns]::GetHostEntry($ip)
+                        $hostName = $entry.HostName
+                        if ($hostName -eq $ip) {
+                            Add-Result -ResultBox $ResultBox -Text "  $ip  PTR レコードなし"
+                        } else {
+                            Add-Result -ResultBox $ResultBox -Text "  $ip  →  $hostName"
+                        }
+                    } catch {
+                        $inner = $_.Exception.InnerException
+                        $msg   = if ($inner) { $inner.Message } else { $_.Exception.Message }
+                        Add-Result -ResultBox $ResultBox -Text "  $ip  逆引き失敗  ($msg)"
+                    }
+                }
             }
         } catch {
             Add-Result -ResultBox $ResultBox -Text "[エラー] tracert 実行失敗: $($_.Exception.Message)"
