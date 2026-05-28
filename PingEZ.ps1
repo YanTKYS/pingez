@@ -441,6 +441,63 @@ function Invoke-AllChecks {
 }
 #endregion
 
+#region ---- ローカル情報確認処理 ----
+function Invoke-LocalInfoCheck {
+    param(
+        [System.Windows.Forms.RichTextBox]$ResultBox,
+        [object]$StatusLabel
+    )
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    Add-Separator -ResultBox $ResultBox -Title "ローカル情報  [$timestamp]"
+    $StatusLabel.Text = "実行中: ローカル情報取得..."
+    [System.Windows.Forms.Application]::DoEvents()
+
+    # PrefixLength → サブネットマスク変換
+    function ConvertTo-SubnetMask {
+        param([int]$Prefix)
+        $octets = @(0, 0, 0, 0)
+        for ($i = 0; $i -lt 4; $i++) {
+            $bits     = [Math]::Min(8, [Math]::Max(0, $Prefix - $i * 8))
+            $octets[$i] = [int]([Math]::Pow(2, 8) - [Math]::Pow(2, 8 - $bits))
+        }
+        return $octets -join '.'
+    }
+
+    try {
+        $configs = Get-NetIPConfiguration -ErrorAction Stop |
+            Where-Object { $_.IPv4Address -and $_.InterfaceAlias -notmatch 'Loopback' }
+
+        if (-not $configs) {
+            Add-Result -ResultBox $ResultBox -Text "有効な IPv4 アダプタが見つかりませんでした"
+        } else {
+            foreach ($cfg in $configs) {
+                $adapterStatus = $cfg.NetAdapter.Status
+                Add-Result -ResultBox $ResultBox -Text "NIC: $($cfg.InterfaceAlias)  ($adapterStatus)"
+
+                foreach ($addr in $cfg.IPv4Address) {
+                    $mask = ConvertTo-SubnetMask -Prefix $addr.PrefixLength
+                    Add-Result -ResultBox $ResultBox -Text "  IPアドレス  : $($addr.IPAddress) / $($addr.PrefixLength)  ($mask)"
+                }
+
+                $gw = if ($cfg.IPv4DefaultGateway) { $cfg.IPv4DefaultGateway.NextHop } else { '(未設定)' }
+                Add-Result -ResultBox $ResultBox -Text "  ゲートウェイ: $gw"
+
+                $dnsIPv4 = $cfg.DNSServer | Where-Object { $_.AddressFamily -eq 2 }
+                $dnsText = if ($dnsIPv4 -and $dnsIPv4.ServerAddresses) {
+                    ($dnsIPv4.ServerAddresses | Where-Object { $_ }) -join ', '
+                } else { '(未設定)' }
+                Add-Result -ResultBox $ResultBox -Text "  DNSサーバ   : $dnsText"
+                Add-Result -ResultBox $ResultBox -Text ""
+            }
+        }
+    } catch {
+        Add-Result -ResultBox $ResultBox -Text "[エラー] ローカル情報の取得に失敗しました: $($_.Exception.Message)"
+    }
+
+    $StatusLabel.Text = "完了: ローカル情報"
+}
+#endregion
+
 #region ---- 保存処理 ----
 function Save-Results {
     param([object]$StatusLabel)
@@ -651,7 +708,17 @@ function Initialize-MainForm {
     $btnAll.Font      = New-Object System.Drawing.Font('Meiryo UI', 9, [System.Drawing.FontStyle]::Bold)
     $panelLeft.Controls.Add($btnAll)
 
-    $yClear = $yAll + $bH + 12
+    $yLocal = $yAll + $bH + 8
+    $btnLocalInfo = New-Object System.Windows.Forms.Button
+    $btnLocalInfo.Text      = "ローカル情報"
+    $btnLocalInfo.Location  = New-Object System.Drawing.Point(0, $yLocal)
+    $btnLocalInfo.Size      = New-Object System.Drawing.Size($bW, $bH)
+    $btnLocalInfo.BackColor = [System.Drawing.Color]::FromArgb(0, 140, 140)
+    $btnLocalInfo.ForeColor = [System.Drawing.Color]::White
+    $btnLocalInfo.FlatStyle = 'Flat'
+    $panelLeft.Controls.Add($btnLocalInfo)
+
+    $yClear = $yLocal + $bH + 12
     $btnClear = New-Object System.Windows.Forms.Button
     $btnClear.Text      = "結果クリア"
     $btnClear.Location  = New-Object System.Drawing.Point(0, $yClear)
@@ -706,7 +773,7 @@ function Initialize-MainForm {
     $form.Controls.Add($strip)
 
     # ---- ボタン一括制御 ----
-    $script:execButtons = @($btnPing, $btnTcp, $btnTracert, $btnDns, $btnAll)
+    $script:execButtons = @($btnPing, $btnTcp, $btnTracert, $btnDns, $btnAll, $btnLocalInfo)
     $script:setRunning  = { foreach ($b in $script:execButtons) { $b.Enabled = $false } }
     $script:setReady    = { foreach ($b in $script:execButtons) { $b.Enabled = $true  } }
 
@@ -761,6 +828,14 @@ function Initialize-MainForm {
         & $script:setRunning
         $script:statusLabel.Text = "実行中: 全確認 (Ping / TCP / DNS)..."
         try { Invoke-AllChecks -Targets $t -Ports $p -ResultBox $script:txtResult -StatusLabel $script:statusLabel }
+        catch { $script:statusLabel.Text = "エラー"; [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "エラー", 'OK', 'Error') | Out-Null }
+        & $script:setReady
+    })
+
+    $btnLocalInfo.Add_Click({
+        & $script:setRunning
+        $script:statusLabel.Text = "実行中: ローカル情報取得..."
+        try { Invoke-LocalInfoCheck -ResultBox $script:txtResult -StatusLabel $script:statusLabel }
         catch { $script:statusLabel.Text = "エラー"; [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "エラー", 'OK', 'Error') | Out-Null }
         & $script:setReady
     })
