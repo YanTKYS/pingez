@@ -93,16 +93,19 @@ function Test-TargetSafe {
 function Add-Result {
     param(
         [System.Windows.Forms.RichTextBox]$ResultBox,
-        [string]$Text
+        [string]$Text,
+        $OverrideColor = $null
     )
     $script:LogBuffer.AppendLine($Text) | Out-Null
 
-    $color = if     ($Text -match '成功')                { [System.Drawing.Color]::FromArgb(80,  220, 100) }
-             elseif ($Text -match 'タイムアウト|ICMP 無応答') { [System.Drawing.Color]::FromArgb(255, 210,  60) }
-             elseif ($Text -match '失敗|エラー')           { [System.Drawing.Color]::FromArgb(255, 110, 110) }
-             elseif ($Text -match 'スキップ')              { [System.Drawing.Color]::FromArgb(255, 170,  60) }
-             elseif ($Text -match '^={3,}')               { [System.Drawing.Color]::FromArgb(80,  180, 255) }
-             else                                         { [System.Drawing.Color]::FromArgb(200, 230, 200) }
+    $color = if ($OverrideColor -ne $null) {
+        $OverrideColor
+    } elseif ($Text -match '成功')                { [System.Drawing.Color]::FromArgb(80,  220, 100) }
+      elseif ($Text -match 'タイムアウト|ICMP 無応答') { [System.Drawing.Color]::FromArgb(255, 210,  60) }
+      elseif ($Text -match '失敗|エラー')           { [System.Drawing.Color]::FromArgb(255, 110, 110) }
+      elseif ($Text -match 'スキップ')              { [System.Drawing.Color]::FromArgb(255, 170,  60) }
+      elseif ($Text -match '^={3,}')               { [System.Drawing.Color]::FromArgb(80,  180, 255) }
+      else                                         { [System.Drawing.Color]::FromArgb(200, 230, 200) }
 
     $ResultBox.SelectionStart  = $ResultBox.TextLength
     $ResultBox.SelectionLength = 0
@@ -255,10 +258,30 @@ function Invoke-TracertCheck {
             continue
         }
         Add-Result -ResultBox $ResultBox -Text "--- tracert: $target ---"
+
+        # ② 宛先の事前名前解決
+        $isIP = $target -match '^\d{1,3}(\.\d{1,3}){3}$'
+        try {
+            $entry = [System.Net.Dns]::GetHostEntry($target)
+            if ($isIP) {
+                $hn   = $entry.HostName
+                $info = if ($hn -eq $target) { 'PTR レコードなし' } else { "ホスト名: $hn" }
+            } else {
+                $addrs = ($entry.AddressList | ForEach-Object { $_.ToString() }) -join ', '
+                $info  = if ($addrs) { "IP: $addrs" } else { 'IP アドレス未解決' }
+            }
+            Add-Result -ResultBox $ResultBox -Text "  [宛先解決: $info]"
+        } catch {
+            Add-Result -ResultBox $ResultBox -Text "  [宛先解決: 失敗]"
+        }
+
         $StatusLabel.Text = "実行中: tracert → $target  (時間がかかる場合があります)"
         [System.Windows.Forms.Application]::DoEvents()
 
-        $hopIPs = [System.Collections.Generic.List[string]]::new()
+        $hopIPs       = [System.Collections.Generic.List[string]]::new()
+        $hopCount     = 0
+        $timeoutCount = 0
+        $maxRttAll    = -1
 
         try {
             $proc = New-Object System.Diagnostics.Process
@@ -272,7 +295,6 @@ function Invoke-TracertCheck {
             $proc.Start() | Out-Null
 
             $prevBlank = $false
-            $hopCount  = 0
 
             while (-not $proc.StandardOutput.EndOfStream) {
                 $line = $proc.StandardOutput.ReadLine()
@@ -283,14 +305,25 @@ function Invoke-TracertCheck {
                 $prevBlank = $false
                 if ($line -match '^\s+\d+\s+') {
                     $hopCount++
-                    # ホップ行末尾の IPv4 アドレスを収集 (タイムアウト行は対象外)
                     if ($line -match '(\d{1,3}(?:\.\d{1,3}){3})\s*$') {
                         $hopIPs.Add($matches[1]) | Out-Null
                     }
                     if ($line -match '\*\s+\*\s+\*') {
+                        $timeoutCount++
                         Add-Result -ResultBox $ResultBox -Text "$line  ← ICMP 無応答"
                     } else {
-                        Add-Result -ResultBox $ResultBox -Text $line
+                        # ① ホップ行の RTT を解析して色付け
+                        $hopMaxRtt = -1
+                        foreach ($m in [regex]::Matches($line, '<?\s*(\d+)\s*ms')) {
+                            $v = [int]$m.Groups[1].Value
+                            if ($v -gt $hopMaxRtt) { $hopMaxRtt = $v }
+                        }
+                        if ($hopMaxRtt -gt $maxRttAll) { $maxRttAll = $hopMaxRtt }
+
+                        $hopColor = if ($hopMaxRtt -ge 200) { [System.Drawing.Color]::FromArgb(255, 110, 110) }
+                                    elseif ($hopMaxRtt -ge 50)  { [System.Drawing.Color]::FromArgb(255, 210,  60) }
+                                    else                        { $null }
+                        Add-Result -ResultBox $ResultBox -Text $line -OverrideColor $hopColor
                     }
                 } else {
                     Add-Result -ResultBox $ResultBox -Text $line
@@ -301,8 +334,13 @@ function Invoke-TracertCheck {
                 $proc.Kill()
                 Add-Result -ResultBox $ResultBox -Text "[タイムアウト: tracert を強制終了しました]"
             }
+
+            # ③ 完了サマリー
             if ($hopCount -gt 0) {
-                Add-Result -ResultBox $ResultBox -Text "  [経由ホップ数: $hopCount]"
+                $parts = @("経由ホップ数: $hopCount")
+                if ($maxRttAll -ge 0)     { $parts += "最大RTT: ${maxRttAll}ms" }
+                if ($timeoutCount -gt 0)  { $parts += "タイムアウト: ${timeoutCount} ホップ" }
+                Add-Result -ResultBox $ResultBox -Text "  [$($parts -join ' / ')]"
             }
 
             # ホップ IP の DNS 逆引き
