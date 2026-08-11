@@ -21,6 +21,7 @@ $script:statusLabel = $null
 $script:execButtons = @()
 $script:setRunning  = $null
 $script:setReady    = $null
+$script:isBusy      = $false
 
 $script:PortServices = @{
     20 = 'FTP-data';  21 = 'FTP';        22 = 'SSH';       23 = 'Telnet'
@@ -50,7 +51,8 @@ function Get-Ports {
             if ($num -ge 1 -and $num -le 65535) { $result += $num }
         }
     }
-    return $result
+    # 重複ポートを除外（例: "80,80,443" の入力による無駄な二重確認を防ぐ）
+    return @($result | Select-Object -Unique)
 }
 #endregion
 
@@ -441,6 +443,18 @@ function Invoke-AllChecks {
 }
 #endregion
 
+#region ---- サブネットマスク変換 ----
+function ConvertTo-SubnetMask {
+    param([int]$Prefix)
+    $octets = @(0, 0, 0, 0)
+    for ($i = 0; $i -lt 4; $i++) {
+        $bits       = [Math]::Min(8, [Math]::Max(0, $Prefix - $i * 8))
+        $octets[$i] = [int]([Math]::Pow(2, 8) - [Math]::Pow(2, 8 - $bits))
+    }
+    return $octets -join '.'
+}
+#endregion
+
 #region ---- ローカル情報確認処理 ----
 function Invoke-LocalInfoCheck {
     param(
@@ -451,17 +465,6 @@ function Invoke-LocalInfoCheck {
     Add-Separator -ResultBox $ResultBox -Title "ローカル情報  [$timestamp]"
     $StatusLabel.Text = "実行中: ローカル情報取得..."
     [System.Windows.Forms.Application]::DoEvents()
-
-    # PrefixLength → サブネットマスク変換
-    function ConvertTo-SubnetMask {
-        param([int]$Prefix)
-        $octets = @(0, 0, 0, 0)
-        for ($i = 0; $i -lt 4; $i++) {
-            $bits     = [Math]::Min(8, [Math]::Max(0, $Prefix - $i * 8))
-            $octets[$i] = [int]([Math]::Pow(2, 8) - [Math]::Pow(2, 8 - $bits))
-        }
-        return $octets -join '.'
-    }
 
     try {
         $configs = Get-NetIPConfiguration -ErrorAction Stop |
@@ -574,6 +577,24 @@ function Load-TargetList {
             [System.Windows.Forms.MessageBox]::Show("読み込みに失敗しました。`n$($_.Exception.Message)", "読み込みエラー", 'OK', 'Error') | Out-Null
         }
     }
+}
+#endregion
+
+#region ---- 実行アクション共通処理 ----
+function Invoke-CheckAction {
+    param(
+        [string]$RunningText,
+        [scriptblock]$Action
+    )
+    & $script:setRunning
+    $script:statusLabel.Text = $RunningText
+    try {
+        & $Action
+    } catch {
+        $script:statusLabel.Text = "エラー"
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "エラー", 'OK', 'Error') | Out-Null
+    }
+    & $script:setReady
 }
 #endregion
 
@@ -773,19 +794,30 @@ function Initialize-MainForm {
     $form.Controls.Add($strip)
 
     # ---- ボタン一括制御 ----
-    $script:execButtons = @($btnPing, $btnTcp, $btnTracert, $btnDns, $btnAll, $btnLocalInfo)
-    $script:setRunning  = { foreach ($b in $script:execButtons) { $b.Enabled = $false } }
-    $script:setReady    = { foreach ($b in $script:execButtons) { $b.Enabled = $true  } }
+    # 実行中は全ボタンを無効化する（結果クリアや宛先リストの読込/保存による
+    # 実行中の状態変化・ウィンドウを閉じての強制終了を防ぐため）
+    $script:execButtons = @($btnPing, $btnTcp, $btnTracert, $btnDns, $btnAll, $btnLocalInfo,
+                             $btnClear, $btnSave, $btnListLoad, $btnListSave)
+    $script:setRunning  = { $script:isBusy = $true;  foreach ($b in $script:execButtons) { $b.Enabled = $false } }
+    $script:setReady    = { $script:isBusy = $false; foreach ($b in $script:execButtons) { $b.Enabled = $true  } }
+
+    # 実行中にウィンドウを閉じるとコントロール破棄後のアクセスでエラー落ちするため防止する
+    $form.Add_FormClosing({
+        if ($script:isBusy) {
+            $_.Cancel = $true
+            [System.Windows.Forms.MessageBox]::Show(
+                "確認処理を実行中です。`n処理が完了してから閉じてください。",
+                "実行中", 'OK', 'Warning') | Out-Null
+        }
+    })
 
     # ---- イベントハンドラ ----
     $btnPing.Add_Click({
         $t = Get-Targets -TextBox $script:txtTarget
         if (-not (Test-TargetsNotEmpty $t)) { return }
-        & $script:setRunning
-        $script:statusLabel.Text = "実行中: Ping 確認..."
-        try { Invoke-PingCheck -Targets $t -ResultBox $script:txtResult -StatusLabel $script:statusLabel }
-        catch { $script:statusLabel.Text = "エラー"; [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "エラー", 'OK', 'Error') | Out-Null }
-        & $script:setReady
+        Invoke-CheckAction -RunningText "実行中: Ping 確認..." -Action {
+            Invoke-PingCheck -Targets $t -ResultBox $script:txtResult -StatusLabel $script:statusLabel
+        }
     })
 
     $btnTcp.Add_Click({
@@ -793,31 +825,25 @@ function Initialize-MainForm {
         if (-not (Test-TargetsNotEmpty $t)) { return }
         $p = Get-Ports -PortText $script:txtPort.Text
         if (-not (Test-PortsValid -PortText $script:txtPort.Text -Ports $p)) { return }
-        & $script:setRunning
-        $script:statusLabel.Text = "実行中: TCP ポート確認..."
-        try { Invoke-TcpCheck -Targets $t -Ports $p -ResultBox $script:txtResult -StatusLabel $script:statusLabel }
-        catch { $script:statusLabel.Text = "エラー"; [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "エラー", 'OK', 'Error') | Out-Null }
-        & $script:setReady
+        Invoke-CheckAction -RunningText "実行中: TCP ポート確認..." -Action {
+            Invoke-TcpCheck -Targets $t -Ports $p -ResultBox $script:txtResult -StatusLabel $script:statusLabel
+        }
     })
 
     $btnTracert.Add_Click({
         $t = Get-Targets -TextBox $script:txtTarget
         if (-not (Test-TargetsNotEmpty $t)) { return }
-        & $script:setRunning
-        $script:statusLabel.Text = "実行中: Tracert 確認..."
-        try { Invoke-TracertCheck -Targets $t -ResultBox $script:txtResult -StatusLabel $script:statusLabel }
-        catch { $script:statusLabel.Text = "エラー"; [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "エラー", 'OK', 'Error') | Out-Null }
-        & $script:setReady
+        Invoke-CheckAction -RunningText "実行中: Tracert 確認..." -Action {
+            Invoke-TracertCheck -Targets $t -ResultBox $script:txtResult -StatusLabel $script:statusLabel
+        }
     })
 
     $btnDns.Add_Click({
         $t = Get-Targets -TextBox $script:txtTarget
         if (-not (Test-TargetsNotEmpty $t)) { return }
-        & $script:setRunning
-        $script:statusLabel.Text = "実行中: DNS 確認..."
-        try { Invoke-DnsCheck -Targets $t -ResultBox $script:txtResult -StatusLabel $script:statusLabel }
-        catch { $script:statusLabel.Text = "エラー"; [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "エラー", 'OK', 'Error') | Out-Null }
-        & $script:setReady
+        Invoke-CheckAction -RunningText "実行中: DNS 確認..." -Action {
+            Invoke-DnsCheck -Targets $t -ResultBox $script:txtResult -StatusLabel $script:statusLabel
+        }
     })
 
     $btnAll.Add_Click({
@@ -825,19 +851,15 @@ function Initialize-MainForm {
         if (-not (Test-TargetsNotEmpty $t)) { return }
         $p = Get-Ports -PortText $script:txtPort.Text
         if (-not (Test-PortsValid -PortText $script:txtPort.Text -Ports $p)) { return }
-        & $script:setRunning
-        $script:statusLabel.Text = "実行中: 全確認 (Ping / TCP / DNS)..."
-        try { Invoke-AllChecks -Targets $t -Ports $p -ResultBox $script:txtResult -StatusLabel $script:statusLabel }
-        catch { $script:statusLabel.Text = "エラー"; [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "エラー", 'OK', 'Error') | Out-Null }
-        & $script:setReady
+        Invoke-CheckAction -RunningText "実行中: 全確認 (Ping / TCP / DNS)..." -Action {
+            Invoke-AllChecks -Targets $t -Ports $p -ResultBox $script:txtResult -StatusLabel $script:statusLabel
+        }
     })
 
     $btnLocalInfo.Add_Click({
-        & $script:setRunning
-        $script:statusLabel.Text = "実行中: ローカル情報取得..."
-        try { Invoke-LocalInfoCheck -ResultBox $script:txtResult -StatusLabel $script:statusLabel }
-        catch { $script:statusLabel.Text = "エラー"; [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "エラー", 'OK', 'Error') | Out-Null }
-        & $script:setReady
+        Invoke-CheckAction -RunningText "実行中: ローカル情報取得..." -Action {
+            Invoke-LocalInfoCheck -ResultBox $script:txtResult -StatusLabel $script:statusLabel
+        }
     })
 
     $btnClear.Add_Click({
