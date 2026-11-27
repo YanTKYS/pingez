@@ -240,10 +240,29 @@ server01.example.local
 
 ---
 
+## ライセンス
+
+本リポジトリの自作部分は [MIT License](LICENSE) の下で公開しています。  
+Copyright (c) 2026 YanTKYS
+
+### 適用範囲
+
+| 対象 | ライセンス |
+|------|------|
+| `PingEZ.ps1` | MIT License（ファイル冒頭のコメントに全文を記載。単独でコピーして利用・配布する場合も、この表示を残してください） |
+| `README.md` / `operation_handover.md` / `test_scenarios.md` / `docs/` 配下の文書 | MIT License |
+
+- 第三者のコード・ライブラリ・素材・データは含んでいません（Windows 標準機能と .NET Framework / PowerShell の標準クラスを実行時に呼び出すのみ）。
+- `docs/comparison_with_existing_tools.md` に記載の ExPing・PingInfoView 等は設計上の参考として名称を挙げているだけで、本リポジトリには含まれません。各ツールのライセンスはそれぞれの提供元に従います。
+- 本ツールは確認専用であり、ネットワーク設定を変更しないという仕様に変更はありません。
+
+---
+
 ## ファイル構成
 
 ```
-PingEZ.ps1              # ツール本体
+PingEZ.ps1              # ツール本体（冒頭に MIT License 全文を同梱）
+LICENSE                 # MIT License
 README.md               # 本ドキュメント
 test_scenarios.md       # テストシナリオ
 operation_handover.md   # 運用引継ぎ資料
